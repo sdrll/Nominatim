@@ -16,6 +16,8 @@ import math
 from urllib.parse import urlencode
 
 import sqlalchemy as sa
+from prometheus_client import generate_latest, Summary, Counter
+
 
 from nominatim.errors import UsageError
 from nominatim.config import Configuration
@@ -31,6 +33,12 @@ CONTENT_HTML = 'text/html; charset=utf-8'
 CONTENT_JSON = 'application/json; charset=utf-8'
 
 CONTENT_TYPE = {'text': CONTENT_TEXT, 'xml': CONTENT_XML, 'debug': CONTENT_HTML}
+REQUEST_TIME = Summary('request_processing_seconds', 'Time spent processing request')
+HTTP_STATUS_CODES_COUNTER = Counter(
+    'http_status_codes',
+    'Counts of HTTP status codes returned by endpoints',
+    ['status_code', 'endpoint']
+)
 
 class ASGIAdaptor(abc.ABC):
     """ Adapter class for the different ASGI frameworks.
@@ -117,6 +125,7 @@ class ASGIAdaptor(abc.ABC):
             loglib.log().var_dump('Message', msg)
             msg = loglib.get_and_disable()
 
+        HTTP_STATUS_CODES_COUNTER.labels(status_code=int(status), endpoint='search_endpoint').inc()
         raise self.error(msg, status)
 
 
@@ -394,6 +403,7 @@ async def lookup_endpoint(api: napi.NominatimAPIAsync, params: ASGIAdaptor) -> A
 
     output = formatting.format_result(results, fmt, fmt_options)
 
+    HTTP_STATUS_CODES_COUNTER.labels(status_code=200, endpoint='search_endpoint').inc()
     return params.build_response(output, num_results=len(results))
 
 
@@ -427,7 +437,7 @@ async def _unstructured_search(query: str, api: napi.NominatimAPIAsync,
 
     return await api.search(query, **details)
 
-
+@REQUEST_TIME.time()
 async def search_endpoint(api: napi.NominatimAPIAsync, params: ASGIAdaptor) -> Any:
     """ Server glue for /search endpoint. See API docs for details.
     """
@@ -527,6 +537,11 @@ async def deletable_endpoint(api: napi.NominatimAPIAsync, params: ASGIAdaptor) -
 
     return params.build_response(formatting.format_result(results, fmt, {}))
 
+async def metrics_endpoint(api: napi.NominatimAPIAsync, params: ASGIAdaptor) -> Any:
+    """ Server glue for /polygons endpoint.
+        Prometheus metric endpoint
+    """
+    return params.build_response(generate_latest())
 
 async def polygons_endpoint(api: napi.NominatimAPIAsync, params: ASGIAdaptor) -> Any:
     """ Server glue for /polygons endpoint.
@@ -570,4 +585,5 @@ ROUTES = [
     ('search', search_endpoint),
     ('deletable', deletable_endpoint),
     ('polygons', polygons_endpoint),
+    ('metrics', metrics_endpoint),
 ]

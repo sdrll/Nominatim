@@ -12,7 +12,7 @@ from pathlib import Path
 import datetime as dt
 
 from falcon.asgi import App, Request, Response
-
+from prometheus_client import start_wsgi_server
 from nominatim.api import NominatimAPIAsync
 import nominatim.api.v1 as api_impl
 from nominatim.config import Configuration
@@ -180,4 +180,5 @@ def run_wsgi() -> App:
 
         Make sure uvicorn is run from the project directory.
     """
+    start_wsgi_server(8030)
     return get_application(Path('.'))
